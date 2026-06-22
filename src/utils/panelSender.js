@@ -106,15 +106,15 @@ const CATEGORY_CONFIG = {
 };
 
 async function sendPanels(client) {
-    console.log('[Panel] Starting to send panels...');
+    console.log('[Panel] Starting to send/edit panels...');
     for (const panel of PANELS) {
         try {
-            const channel = client.channels.cache.get(panel.channelId);
-            if (!channel) {
+            let targetChannel = client.channels.cache.get(panel.channelId);
+            if (!targetChannel) {
                 console.log(`[Panel] Channel ${panel.channelId} not found in cache, fetching...`);
                 try {
-                    const fetched = await client.channels.fetch(panel.channelId);
-                    if (!fetched) {
+                    targetChannel = await client.channels.fetch(panel.channelId);
+                    if (!targetChannel) {
                         console.log(`[Panel] Channel ${panel.channelId} not found, skipping...`);
                         continue;
                     }
@@ -122,21 +122,6 @@ async function sendPanels(client) {
                     console.log(`[Panel] Failed to fetch channel ${panel.channelId}: ${fetchErr.message}, skipping...`);
                     continue;
                 }
-            }
-
-            // Get the channel (from cache or fresh)
-            const targetChannel = client.channels.cache.get(panel.channelId);
-
-            // Delete old bot messages
-            try {
-                const messages = await targetChannel.messages.fetch({ limit: 50 });
-                const botMessages = messages.filter(m => m.author.id === client.user.id);
-                for (const msg of botMessages.values()) {
-                    await msg.delete().catch(() => {});
-                }
-                console.log(`[Panel] Deleted ${botMessages.size} old messages from ${targetChannel.name}`);
-            } catch (delErr) {
-                console.log(`[Panel] Could not fetch/delete messages in ${panel.channelId}: ${delErr.message}`);
             }
 
             // Build embed
@@ -163,13 +148,30 @@ async function sendPanels(client) {
                 )
             );
 
-            await targetChannel.send({ embeds: [embed], components: [row] });
-            console.log(`[Panel] Sent "${panel.embed.title}" to ${targetChannel.name}`);
+            const payload = { embeds: [embed], components: [row] };
+
+            // Try to find existing bot message and edit it
+            try {
+                const messages = await targetChannel.messages.fetch({ limit: 50 });
+                const botMsg = messages.find(m => m.author.id === client.user.id);
+                if (botMsg) {
+                    await botMsg.edit(payload);
+                    console.log(`[Panel] Edited existing panel in ${targetChannel.name}`);
+                } else {
+                    await targetChannel.send(payload);
+                    console.log(`[Panel] Sent new panel to ${targetChannel.name}`);
+                }
+            } catch (editErr) {
+                // If edit fails (e.g. message too old), send new one
+                console.log(`[Panel] Edit failed, sending new message to ${targetChannel.name}: ${editErr.message}`);
+                await targetChannel.send(payload);
+                console.log(`[Panel] Sent new panel to ${targetChannel.name}`);
+            }
         } catch (err) {
             console.error(`[Panel] Error sending panel to ${panel.channelId}:`, err.message);
         }
     }
-    console.log('[Panel] All panels sent successfully!');
+    console.log('[Panel] All panels sent/edited successfully!');
 }
 
 // Map category to display name

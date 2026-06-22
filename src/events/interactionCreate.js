@@ -18,6 +18,83 @@ function getCategoryName(category) {
     return config ? config.categoryName : category;
 }
 
+// Helper: create ticket directly without modal (for ads)
+async function handleDirectTicket(interaction, category, guild, user) {
+    const config = await db.prepare('SELECT * FROM guild_configs WHERE guild_id = ?').get(guild.id);
+    if (!config) return interaction.reply({ content: '❌ لم يتم إعداد النظام بعد. السيرفر يحتاج لتشغيل `/setup_ticket`.', ephemeral: true });
+
+    const panelChannelId = CATEGORY_PANEL_MAP[category];
+    let parentId;
+    if (panelChannelId) {
+        const panelChannel = guild.channels.cache.get(panelChannelId);
+        if (panelChannel && panelChannel.parentId) {
+            parentId = panelChannel.parentId;
+        } else {
+            try {
+                const fetched = await guild.channels.fetch(panelChannelId);
+                if (fetched && fetched.parentId) parentId = fetched.parentId;
+            } catch (e) { /* ignore */ }
+        }
+    }
+    if (!parentId) {
+        return interaction.reply({ content: '❌ تعذر تحديد القسم.', ephemeral: true });
+    }
+
+    await interaction.deferReply({ ephemeral: true });
+
+    const channel = await guild.channels.create({
+        name: `${category}-${user.username}`,
+        type: ChannelType.GuildText,
+        parent: parentId,
+        permissionOverwrites: [
+            { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+            { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+            { id: config.support_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+        ],
+    });
+
+    await db.prepare('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)').run(user.id, user.username);
+    const res = await db.prepare('INSERT INTO tickets (user_id, channel_id, category, topic, description, status) VALUES (?, ?, ?, ?, ?, ?)')
+        .run(user.id, channel.id, category, 'طلب اعلان', 'طلب اعلان جديد', 'open');
+
+    const panel = await generateAdminPanel(user.id, res.lastInsertRowid);
+    await channel.send(panel);
+
+    const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG['tech'];
+    await channel.send({
+        embeds: [new EmbedBuilder()
+            .setTitle(catConfig.welcomeMessage)
+            .setDescription(`<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${config.support_role_id}>.\n\nاكتب تفاصيل طلب إعلانك هنا.`)
+            .setColor('#26344d')]
+    });
+    console.log(`[🎫 تذكرة جديدة] ${user.tag} فتح تذكرة #${res.lastInsertRowid} (${getCategoryName(category)})`);
+
+    // Log
+    const newTicketLog = new EmbedBuilder()
+        .setTitle('🎫 تذكرة جديدة')
+        .addFields(
+            { name: 'رقم التذكرة', value: `#${res.lastInsertRowid}`, inline: true },
+            { name: 'القسم', value: getCategoryName(category), inline: true },
+            { name: 'صاحب التذكرة', value: `<@${user.id}>`, inline: true },
+            { name: 'القناة', value: `${channel}`, inline: false }
+        )
+        .setColor('#26344d')
+        .setTimestamp();
+
+    const logConfig = await db.prepare('SELECT log_channel_id FROM guild_configs WHERE guild_id = ?').get(guild.id);
+    if (logConfig?.log_channel_id) {
+        const logChannel = interaction.client.channels.cache.get(logConfig.log_channel_id);
+        if (logChannel) {
+            await logChannel.send({
+                content: `<@&${config.support_role_id}> تذكرة جديدة تحتاج انتباهكم!`,
+                embeds: [newTicketLog]
+            }).catch(() => { });
+        }
+    }
+
+    await interaction.editReply({ content: `✅ تم فتح التذكرة بنجاح: ${channel}` });
+}
+
 module.exports = {
     name: Events.InteractionCreate,
     async execute(interaction) {
@@ -96,7 +173,6 @@ module.exports = {
                 // Check rate limiting
                 const guildConfig = await db.prepare('SELECT * FROM guild_configs WHERE guild_id = ?').get(interaction.guild.id);
                 if (guildConfig && guildConfig.rate_limit_enabled) {
-                    // Count tickets created today by this user
                     const today = new Date().toISOString().split('T')[0];
                     const ticketsToday = await db.prepare(`
                         SELECT COUNT(*) as count 
@@ -115,9 +191,13 @@ module.exports = {
                     }
                 }
 
+                // Ads: create ticket directly without modal
+                if (category === 'ads') {
+                    return handleDirectTicket(interaction, category, guild, user);
+                }
+
                 console.log(`[🎫 نموذج] ${user.tag} يفتح نموذج تذكرة (${category})`);
 
-                // Get category-specific config
                 const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG['tech'];
 
                 const modal = new ModalBuilder()
