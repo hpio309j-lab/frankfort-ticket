@@ -180,4 +180,10 @@ function getCategoryName(category) {
     return config ? config.categoryName : category;
 }
 
-module.exports = { sendPanels, CATEGORY_PANEL_MAP, CATEGORY_CONFIG, PANELS, getCategoryName };
+// Category-specific role overrides (who can view ticket rooms)
+const CATEGORY_ROLE_MAP = {
+    'ads': '1511708504551854161',
+    'admin_submit': '1485470964903841843',
+};
+
+module.exports = { sendPanels, CATEGORY_PANEL_MAP, CATEGORY_CONFIG, CATEGORY_ROLE_MAP, PANELS, getCategoryName };

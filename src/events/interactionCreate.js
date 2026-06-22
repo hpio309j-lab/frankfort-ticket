@@ -2,7 +2,7 @@ const { Events, ChannelType, PermissionFlagsBits, EmbedBuilder, ModalBuilder, Te
 const { db } = require('../db/schema');
 const { generateAdminPanel } = require('../utils/adminPanel');
 const { generateTranscript } = require('../utils/transcript');
-const { CATEGORY_PANEL_MAP, CATEGORY_CONFIG } = require('../utils/panelSender');
+const { CATEGORY_PANEL_MAP, CATEGORY_CONFIG, CATEGORY_ROLE_MAP } = require('../utils/panelSender');
 
 // Helper function to send logs to the configured log channel
 async function sendLog(client, guildId, embed) {
@@ -42,6 +42,8 @@ async function handleDirectTicket(interaction, category, guild, user) {
 
     await interaction.deferReply({ ephemeral: true });
 
+    const viewRole = CATEGORY_ROLE_MAP[category] || config.support_role_id;
+
     const channel = await guild.channels.create({
         name: `${category}-${user.username}`,
         type: ChannelType.GuildText,
@@ -49,7 +51,7 @@ async function handleDirectTicket(interaction, category, guild, user) {
         permissionOverwrites: [
             { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
             { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-            { id: config.support_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+            { id: viewRole, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
         ],
     });
 
@@ -64,7 +66,7 @@ async function handleDirectTicket(interaction, category, guild, user) {
     await channel.send({
         embeds: [new EmbedBuilder()
             .setTitle(catConfig.welcomeMessage)
-            .setDescription(`<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${config.support_role_id}>.\n\nاكتب تفاصيل طلب إعلانك هنا.`)
+            .setDescription(`<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${viewRole}>.\n\nاكتب تفاصيل طلب إعلانك هنا.`)
             .setColor('#26344d')]
     });
     console.log(`[🎫 تذكرة جديدة] ${user.tag} فتح تذكرة #${res.lastInsertRowid} (${getCategoryName(category)})`);
@@ -86,7 +88,7 @@ async function handleDirectTicket(interaction, category, guild, user) {
         const logChannel = interaction.client.channels.cache.get(logConfig.log_channel_id);
         if (logChannel) {
             await logChannel.send({
-                content: `<@&${config.support_role_id}> تذكرة جديدة تحتاج انتباهكم!`,
+                content: `<@&${viewRole}> تذكرة جديدة تحتاج انتباهكم!`,
                 embeds: [newTicketLog]
             }).catch(() => { });
         }
@@ -433,6 +435,8 @@ module.exports = {
                     return interaction.reply({ content: '❌ تعذر تحديد القسم. تأكد من أن البوت لديه صلاحية الوصول.', ephemeral: true });
                 }
 
+                const viewRole = CATEGORY_ROLE_MAP[category] || config.support_role_id;
+
                 const channel = await guild.channels.create({
                     name: `${category}-${user.username}`,
                     type: ChannelType.GuildText,
@@ -440,7 +444,7 @@ module.exports = {
                     permissionOverwrites: [
                         { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
                         { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
-                        { id: config.support_role_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
+                        { id: viewRole, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] }
                     ],
                 });
 
@@ -462,7 +466,7 @@ module.exports = {
                 await channel.send({
                     embeds: [new EmbedBuilder()
                         .setTitle(welcomeMessage)
-                        .setDescription(`**الموضوع:** ${topic}\n**الوصف:** ${desc}\n\n<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${config.support_role_id}>.`)
+                        .setDescription(`**الموضوع:** ${topic}\n**الوصف:** ${desc}\n\n<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${viewRole}>.`)
                         .setColor('#26344d')]
                 });
                 console.log(`[🎫 تذكرة جديدة] ${user.tag} فتح تذكرة #${res.lastInsertRowid} (${getCategoryName(category)}) - ${topic}`);
@@ -485,7 +489,7 @@ module.exports = {
                     const logChannel = interaction.client.channels.cache.get(logConfig.log_channel_id);
                     if (logChannel) {
                         await logChannel.send({
-                            content: `<@&${config.support_role_id}> تذكرة جديدة تحتاج انتباهكم!`,
+                            content: `<@&${viewRole}> تذكرة جديدة تحتاج انتباهكم!`,
                             embeds: [newTicketLog]
                         }).catch(() => { });
                     }
