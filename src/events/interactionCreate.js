@@ -227,7 +227,22 @@ module.exports = {
                 await db.prepare('UPDATE tickets SET claimed_by = ? WHERE ticket_id = ?').run(user.id, ticketId);
                 console.log(`[🙋 استلام] ${user.tag} استلم التذكرة #${ticketId}`);
                 const channel = guild.channels.cache.get(ticket.channel_id);
-                if (channel) await channel.setName(`claimed-${user.username}`);
+                if (channel) {
+                    await channel.setName(`claimed-${user.username}`);
+
+                    // Hide ticket from others, show only to claimer
+                    const ticketViewRole = CATEGORY_ROLE_MAP[ticket.category] || config?.support_role_id;
+                    const permissionOverwrites = [
+                        { id: guild.id, deny: [PermissionFlagsBits.ViewChannel] },
+                        { id: ticket.user_id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                        { id: user.id, allow: [PermissionFlagsBits.ViewChannel, PermissionFlagsBits.SendMessages] },
+                    ];
+                    // Deny the original view role so other members can't see it
+                    if (ticketViewRole && ticketViewRole !== user.id) {
+                        permissionOverwrites.push({ id: ticketViewRole, deny: [PermissionFlagsBits.ViewChannel] });
+                    }
+                    await channel.permissionOverwrites.set(permissionOverwrites);
+                }
 
                 const newPanel = await generateAdminPanel(ticket.user_id, ticketId);
                 await interaction.update(newPanel);
