@@ -182,7 +182,7 @@ function getCategoryName(category) {
 
 // Category-specific role overrides (who can view ticket rooms)
 const CATEGORY_ROLE_MAP = {
-    'ads': '1511708504551854161',
+    'ads': '1511391611807072296',
     'admin_submit': '1485470964903841843',
 };
 
