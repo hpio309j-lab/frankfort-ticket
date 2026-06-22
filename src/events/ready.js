@@ -1,4 +1,5 @@
 const { ActivityType } = require('discord.js');
+const { sendPanels } = require('../utils/panelSender');
 
 module.exports = {
     name: 'clientReady',
@@ -18,5 +19,8 @@ module.exports = {
             activities: [{ name: 'Frankfort Ruturn', type: ActivityType.Streaming, url: 'https://www.twitch.tv/discord' }],
             status: 'idle',
         });
+
+        // Send panels to channels (delete old messages first, then resend)
+        setTimeout(() => sendPanels(client), 3000);
     },
 };

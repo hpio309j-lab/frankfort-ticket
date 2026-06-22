@@ -2,6 +2,7 @@ const { Events, ChannelType, PermissionFlagsBits, EmbedBuilder, ModalBuilder, Te
 const { db } = require('../db/schema');
 const { generateAdminPanel } = require('../utils/adminPanel');
 const { generateTranscript } = require('../utils/transcript');
+const { CATEGORY_PANEL_MAP, CATEGORY_CONFIG } = require('../utils/panelSender');
 
 // Helper function to send logs to the configured log channel
 async function sendLog(client, guildId, embed) {
@@ -9,6 +10,12 @@ async function sendLog(client, guildId, embed) {
     if (!config?.log_channel_id) return;
     const logChannel = client.channels.cache.get(config.log_channel_id);
     if (logChannel) await logChannel.send({ embeds: [embed] }).catch(() => { });
+}
+
+// Map category to display name
+function getCategoryName(category) {
+    const config = CATEGORY_CONFIG[category];
+    return config ? config.categoryName : category;
 }
 
 module.exports = {
@@ -31,7 +38,7 @@ module.exports = {
                 embed.setTitle('🎫 أوامر نظام التذاكر')
                     .setDescription('أوامر إدارة وإعداد نظام التذاكر')
                     .addFields(
-                        { name: '/setup_ticket', value: '```إعداد نظام التذاكر الكامل\nالمعاملات: tech_category, admin_category, general_category, support_role, log_channel, embed_color```', inline: false }
+                        { name: '/setup_ticket', value: '```إعداد نظام التذاكر الكامل\nالمعاملات: support_role, log_channel, embed_color```', inline: false }
                     );
             } else if (category === 'welcome') {
                 embed.setTitle('👋 أوامر نظام الترحيب')
@@ -109,13 +116,17 @@ module.exports = {
                 }
 
                 console.log(`[🎫 نموذج] ${user.tag} يفتح نموذج تذكرة (${category})`);
+
+                // Get category-specific config
+                const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG['tech'];
+
                 const modal = new ModalBuilder()
                     .setCustomId(`ticket_modal_${category}`)
-                    .setTitle('إنشاء تذكرة جديدة');
+                    .setTitle(catConfig.modalTitle);
 
                 modal.addComponents(
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_topic').setLabel('الموضوع').setStyle(TextInputStyle.Short).setRequired(true)),
-                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_desc').setLabel('وصف المشكلة').setStyle(TextInputStyle.Paragraph).setRequired(true))
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_topic').setLabel(catConfig.topicLabel).setStyle(TextInputStyle.Short).setRequired(true)),
+                    new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('ticket_desc').setLabel(catConfig.descLabel).setStyle(TextInputStyle.Paragraph).setRequired(true))
                 );
                 try {
                     await interaction.showModal(modal);
@@ -299,7 +310,7 @@ module.exports = {
 
         if (interaction.isModalSubmit()) {
             if (interaction.customId.startsWith('ticket_modal_')) {
-                const category = interaction.customId.split('_')[2];
+                const category = interaction.customId.replace('ticket_modal_', '');
                 const topic = interaction.fields.getTextInputValue('ticket_topic');
                 const desc = interaction.fields.getTextInputValue('ticket_desc');
                 const { user, guild } = interaction;
@@ -308,7 +319,39 @@ module.exports = {
 
                 if (!config) return interaction.reply({ content: '❌ لم يتم إعداد النظام بعد. السيرفر يحتاج لتشغيل `/setup_ticket`.', ephemeral: true });
 
-                const parentId = category === 'tech' ? config.tech_category_id : category === 'admin' ? config.admin_category_id : config.general_category_id;
+                // Get parent category from the panel channel
+                const panelChannelId = CATEGORY_PANEL_MAP[category];
+                let parentId;
+
+                if (panelChannelId) {
+                    const panelChannel = guild.channels.cache.get(panelChannelId);
+                    if (panelChannel && panelChannel.parentId) {
+                        parentId = panelChannel.parentId;
+                    } else {
+                        // Fallback: fetch the channel if not in cache
+                        try {
+                            const fetchedChannel = await guild.channels.fetch(panelChannelId);
+                            if (fetchedChannel && fetchedChannel.parentId) {
+                                parentId = fetchedChannel.parentId;
+                            }
+                        } catch (e) {
+                            console.log(`[Panel] Could not fetch panel channel ${panelChannelId}: ${e.message}`);
+                        }
+                    }
+                }
+
+                // Fallback to DB config if panel channel not found
+                if (!parentId) {
+                    parentId = category === 'tech' || category === 'inquiry' || category === 'general'
+                        ? config.tech_category_id || config.general_category_id
+                        : category === 'admin' || category === 'admin_submit'
+                            ? config.admin_category_id
+                            : config.general_category_id;
+                }
+
+                if (!parentId) {
+                    return interaction.reply({ content: '❌ تعذر تحديد القسم. تأكد من أن البوت لديه صلاحية الوصول.', ephemeral: true });
+                }
 
                 const channel = await guild.channels.create({
                     name: `${category}-${user.username}`,
@@ -328,10 +371,13 @@ module.exports = {
                 const panel = await generateAdminPanel(user.id, res.lastInsertRowid);
                 await channel.send(panel);
 
-                // Use custom welcome message from config
-                const welcomeMessage = category === 'tech' ? (config.tech_welcome || 'مرحباً بك في قسم الدعم الفني') :
-                    category === 'admin' ? (config.admin_welcome || 'مرحباً بك في قسم الإدارة') :
-                        (config.general_welcome || 'مرحباً بك في قسم الاستفسارات العامة');
+                // Get category-specific welcome message
+                const catConfig = CATEGORY_CONFIG[category] || CATEGORY_CONFIG['tech'];
+                const customWelcome = category === 'tech' ? (config.tech_welcome) :
+                    category === 'admin' || category === 'admin_submit' ? (config.admin_welcome) :
+                        category === 'inquiry' || category === 'general' ? (config.general_welcome) : null;
+
+                const welcomeMessage = customWelcome || catConfig.welcomeMessage;
 
                 await channel.send({
                     embeds: [new EmbedBuilder()
@@ -339,14 +385,14 @@ module.exports = {
                         .setDescription(`**الموضوع:** ${topic}\n**الوصف:** ${desc}\n\n<@${user.id}>، سيتم الرد عليك قريباً من قبل فريق <@&${config.support_role_id}>.`)
                         .setColor('#26344d')]
                 });
-                console.log(`[🎫 تذكرة جديدة] ${user.tag} فتح تذكرة #${res.lastInsertRowid} (${category}) - ${topic}`);
+                console.log(`[🎫 تذكرة جديدة] ${user.tag} فتح تذكرة #${res.lastInsertRowid} (${getCategoryName(category)}) - ${topic}`);
 
                 // Send to log channel with support role mention
                 const newTicketLog = new EmbedBuilder()
                     .setTitle('🎫 تذكرة جديدة')
                     .addFields(
                         { name: 'رقم التذكرة', value: `#${res.lastInsertRowid}`, inline: true },
-                        { name: 'القسم', value: category === 'tech' ? 'دعم فني' : category === 'admin' ? 'إدارة' : 'عام', inline: true },
+                        { name: 'القسم', value: getCategoryName(category), inline: true },
                         { name: 'صاحب التذكرة', value: `<@${user.id}>`, inline: true },
                         { name: 'الموضوع', value: topic, inline: false },
                         { name: 'القناة', value: `${channel}`, inline: false }

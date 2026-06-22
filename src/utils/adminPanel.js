@@ -1,5 +1,6 @@
 const { EmbedBuilder, ActionRowBuilder, ButtonBuilder, ButtonStyle } = require('discord.js');
 const { db } = require('../db/schema');
+const { getCategoryName } = require('./panelSender');
 
 /**
  * Generates the Admin Panel Embed and Components for a specific ticket.
@@ -18,7 +19,7 @@ async function generateAdminPanel(userId, ticketId) {
         .setColor('#2B2D31')
         .addFields(
             { name: '👤 المستخدم', value: `<@${userId}>`, inline: true },
-            { name: '🏷️ القسم', value: `${ticket?.category === 'tech' ? 'دعم فني' : ticket?.category === 'admin' ? 'إدارة' : 'عام'}`, inline: true },
+            { name: '🏷️ القسم', value: ticket?.category ? getCategoryName(ticket.category) : 'غير محدد', inline: true },
             { name: '📜 تذاكر سابقة', value: `${historyCount.count} مغلقة`, inline: true },
             { name: '🆔 رقم التذكرة', value: `#${ticketId}`, inline: true },
             { name: '🕒 عضو منذ', value: `<t:${Math.floor(new Date(user?.created_at || Date.now()).getTime() / 1000)}:R>`, inline: true },
